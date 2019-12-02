@@ -34,16 +34,16 @@ func (t *PaymentChaincode) Init(stub shim.ChaincodeStubInterface) peer.Response 
 	if err != nil {
 		return shim.Error("指定账户的初始余额错误：" + avalStr)
 	}
-	_, err := strconv.Atoi(bvalStr)
+	_, err = strconv.Atoi(bvalStr)
 	if err != nil {
 		return shim.Error("指定账户的初始余额错误：" + bvalStr)
 	}
 
-	err := stub.PutState(a, []byte(avalStr))
+	err = stub.PutState(a, []byte(avalStr))
 	if err != nil {
 		return shim.Error(a + " 保存状态时发生错误")
 	}
-	err := stub.PutState(b, []byte(bvalStr))
+	err = stub.PutState(b, []byte(bvalStr))
 	if err != nil {
 		return shim.Error(b + " 保存状态时发生错误")
 	}
@@ -59,7 +59,7 @@ func (t *PaymentChaincode) Invoke(stub shim.ChaincodeStubInterface) peer.Respons
 	} else if fun == "del" {
 		return delAccount(stub, args)
 	} else if fun == "add" {
-		return addAccount(stub, args)
+		return t.addAccount(stub, args)
 	} else if fun == "set" {
 		return t.set(stub, args)
 	} else if fun == "get" {
@@ -93,27 +93,27 @@ func payment(stub shim.ChaincodeStubInterface, args []string) peer.Response {
 	target := args[1]
 	x := args[2]
 
-	svalStr, err = stub.GetState(source)
+	svalStr, err := stub.GetState(source)
 	if err != nil {
 		return shim.Error("查询" + source + "账户失败")
 	}
 
-	tvalStr, err = stub.GetState(target)
+	tvalStr, err := stub.GetState(target)
 	if err != nil {
 		return shim.Error("查询" + target + "账户失败")
 	}
 
 	//转账
-	xval, err = strconv.Atoi(x)
+	xval, err := strconv.Atoi(x)
 	if err != nil {
 		return shim.Error("转账金额错误")
 	}
 
-	sval, err = strconv.Atoi(svalStr)
+	sval, err := strconv.Atoi(string(svalStr))
 	if err != nil {
 		return shim.Error("处理源账户余额时发生错误")
 	}
-	tval, err = strconv.Atoi(tvalStr)
+	tval, err := strconv.Atoi(string(tvalStr))
 	if err != nil {
 		return shim.Error("处理目标账户余额时发生错误")
 	}
@@ -126,11 +126,11 @@ func payment(stub shim.ChaincodeStubInterface, args []string) peer.Response {
 	tval = tval + xval
 
 	//记账
-	err := stub.PutState(source, []byte(strconv.Itoa(sval)))
+	err = stub.PutState(source, []byte(strconv.Itoa(sval)))
 	if err != nil {
 		return shim.Error("保存转账后源账户信息失败")
 	}
-	err := stub.PutState(target, []byte(strconv.Itoa(tval)))
+	err = stub.PutState(target, []byte(strconv.Itoa(tval)))
 	if err != nil {
 		return shim.Error("保存转账后目标账户信息失败")
 	}
@@ -155,7 +155,7 @@ func delAccount(stub shim.ChaincodeStubInterface, args []string) peer.Response {
 	return shim.Success([]byte("删除指定的账户成功" + args[0]))
 }
 
-func addAccount(stub shim.ChaincodeStubInterface, args []string) peer.Response {
+func (t *PaymentChaincode) addAccount(stub shim.ChaincodeStubInterface, args []string) peer.Response {
 	if len(args) != 2 {
 		return shim.Error("必须且只能指定要新增的账户及初始金额")
 	}
@@ -176,13 +176,13 @@ func addAccount(stub shim.ChaincodeStubInterface, args []string) peer.Response {
 		return shim.Error("查询 " + args[0] + " 账户信息失败" + err.Error())
 	}
 	if result == nil {
-		err := stub.PutState(args[0], []byte(args[1]))
+		err = stub.PutState(args[0], []byte(args[1]))
 		if err != nil {
 			return shim.Error("保存账户：" + a + " 时发生错误")
 		}
 		return shim.Success([]byte("新增账户成功"))
 	}
-	set(stub, args)
+	return t.set(stub, args)
 }
 
 func (t *PaymentChaincode) set(stub shim.ChaincodeStubInterface, args []string) peer.Response {
@@ -209,11 +209,11 @@ func (t *PaymentChaincode) set(stub shim.ChaincodeStubInterface, args []string) 
 	}
 
 	val = val + x
-	err := stub.PutState(args[0], []byte(strconv.Itoa(val)))
+	err = stub.PutState(args[0], []byte(strconv.Itoa(val)))
 	if err != nil {
 		return shim.Error("存入金额时发生错误")
 	}
-	return shim.Error([]byte("存入操作成功"))
+	return shim.Success([]byte("存入操作成功"))
 }
 
 func (t *PaymentChaincode) get(stub shim.ChaincodeStubInterface, args []string) peer.Response {
@@ -234,7 +234,7 @@ func (t *PaymentChaincode) get(stub shim.ChaincodeStubInterface, args []string) 
 		return shim.Error("指定账户不存在或已注销")
 	}
 
-	val, err := strconv.Atoi(result)
+	val, err := strconv.Atoi(string(result))
 	if err != nil {
 		return shim.Error("处理账户余额时发生错误")
 	}
@@ -243,7 +243,7 @@ func (t *PaymentChaincode) get(stub shim.ChaincodeStubInterface, args []string) 
 	}
 
 	val = val - x
-	err := stub.PutState(args[0], []byte(strconv.Itoa(val)))
+	err = stub.PutState(args[0], []byte(strconv.Itoa(val)))
 	if err != nil {
 		return shim.Error("提取失败，保存余额信息时发生错误")
 	}
@@ -253,6 +253,6 @@ func (t *PaymentChaincode) get(stub shim.ChaincodeStubInterface, args []string) 
 func main() {
 	err := shim.Start(new(PaymentChaincode))
 	if err != nil {
-		fmt.Printf("启动 Payment 链码时发生错误：%v\n", err)
+		fmt.Println("启动 Payment 链码时发生错误：%s", err)
 	}
 }
