@@ -157,38 +157,7 @@ func (s *ServerCmd) init() {
 
 // registerFlags registers command flags with viper
 func (s *ServerCmd) registerFlags() {
-	// Get the default config file path
-	cfg := util.GetDefaultConfigFile(cmdName)
-
-	// All env variables must be prefixed
-	s.myViper.SetEnvPrefix(envVarPrefix)
-	s.myViper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
-	// Set specific global flags used by all commands
-	pflags := s.rootCmd.PersistentFlags()
-	pflags.StringVarP(&s.cfgFileName, "config", "c", "", "Configuration file")
-	pflags.MarkHidden("config")
-	// Don't want to use the default parameter for StringVarP. Need to be able to identify if home directory was explicitly set
-	pflags.StringVarP(&s.homeDirectory, "home", "H", "", fmt.Sprintf("Server's home directory (default \"%s\")", filepath.Dir(cfg)))
-	util.FlagString(s.myViper, pflags, "boot", "b", "",
-		"The user:pass for bootstrap admin which is required to build default config file")
-
-	// Register flags for all tagged and exported fields in the config
-	s.cfg = &lib.ServerConfig{}
-	tags := map[string]string{
-		"help.csr.cn":           "The common name field of the certificate signing request to a parent fabric-ca-server",
-		"help.csr.serialnumber": "The serial number in a certificate signing request to a parent fabric-ca-server",
-		"help.csr.hosts":        "A list of comma-separated host names in a certificate signing request to a parent fabric-ca-server",
-	}
-	err := util.RegisterFlags(s.myViper, pflags, s.cfg, nil)
-	if err != nil {
-		panic(err)
-	}
-	caCfg := &lib.CAConfig{}
-	err = util.RegisterFlags(s.myViper, pflags, caCfg, tags)
-	if err != nil {
-		panic(err)
-	}
+	...
 }
 
 // Configuration file is not required for some commands like version
@@ -388,45 +357,7 @@ func NewIssuer(name, homeDir string, config *Config, csp bccsp.BCCSP, idemixLib 
 }
 
 func (i *issuer) Init(renew bool, db db.FabricCADB, levels *dbutil.Levels) error {
-
-	if i.isInitialized {
-		return nil
-	}
-
-	i.mutex.Lock()
-	defer i.mutex.Unlock()
-
-	// After obtaining a lock, check again to see if issuer has been initialized by another thread
-	if i.isInitialized {
-		return nil
-	}
-
-	if db == nil || reflect.ValueOf(db).IsNil() || !db.IsInitialized() {
-		log.Debugf("Returning without initializing Idemix issuer for CA '%s' as the database is not initialized", i.Name())
-		return nil
-	}
-	i.db = db
-	err := i.cfg.init(i.homeDir)
-	if err != nil {
-		return err
-	}
-	err = i.initKeyMaterial(renew)
-	if err != nil {
-		return err
-	}
-	i.credDBAccessor = NewCredentialAccessor(i.db, levels.Credential)
-	log.Debugf("Intializing revocation authority for issuer '%s'", i.Name())
-	i.rc, err = NewRevocationAuthority(i, levels.RAInfo)
-	if err != nil {
-		return err
-	}
-	log.Debugf("Intializing nonce manager for issuer '%s'", i.Name())
-	i.nm, err = NewNonceManager(i, &wallClock{}, levels.Nonce)
-	if err != nil {
-		return err
-	}
-	i.isInitialized = true
-	return nil
+	...
 }
 ```  
 
@@ -443,21 +374,7 @@ func (i *issuer) Init(renew bool, db db.FabricCADB, levels *dbutil.Levels) error
 func (s *Server) Start() (err error) {
 	log.Infof("Starting server in home directory: %s", s.HomeDir)
 
-	s.serveError = nil
-
-	if s.listener != nil {
-		return errors.New("server is already started")
-	}
-
-	// Initialize the server
-	err = s.init(false)
-	if err != nil {
-		err2 := s.closeDB()
-		if err2 != nil {
-			log.Errorf("Close DB failed: %s", err2)
-		}
-		return err
-	}
+	...
 
 	// Register http handlers
 	s.registerHandlers()
@@ -477,13 +394,7 @@ func (s *Server) Start() (err error) {
 
 	// Start listening and serving
 	err = s.listenAndServe()
-	if err != nil {
-		err2 := s.closeDB()
-		if err2 != nil {
-			log.Errorf("Close DB failed: %s", err2)
-		}
-		return err
-	}
+	...
 
 	return nil
 }
@@ -492,6 +403,8 @@ func (s *Server) Start() (err error) {
 其中再次调用了`init()`函数，但这次参数为`false`，表明这次不用重新初始化默认的CA服务了。之后调用了`registerHandlers()`函数，用来注册所有提供服务的终端句柄。接着调用`startOperationsServer()`来开启服务：  
 
 ```go  
+// fabric-ca/lib/server.go
+
 // operationsServer defines the contract required for an operations server
 type operationsServer interface {
 	metrics.Provider
@@ -516,81 +429,15 @@ func (s *Server) startOperationsServer() error {
 之后调用了`operationsServer.RegisterChecker()`接口来检查server的健康状态。随后，调用了`*Server.listenAndServe()`开始监听和提供服务：  
 
 ```go  
+// fabric-ca/lib/server.go
+
 // Starting listening and serving
 func (s *Server) listenAndServe() (err error) {
 
-	var listener net.Listener
-	var clientAuth tls.ClientAuthType
-	var ok bool
-
-	c := s.Config
-
-	// Set default listening address and port
-	if c.Address == "" {
-		c.Address = DefaultServerAddr
-	}
-	if c.Port == 0 {
-		c.Port = DefaultServerPort
-	}
-	addr := net.JoinHostPort(c.Address, strconv.Itoa(c.Port))
-	var addrStr string
+	...
 
 	if c.TLS.Enabled {
-		log.Debug("TLS is enabled")
-		addrStr = fmt.Sprintf("https://%s", addr)
-
-		// If key file is specified and it does not exist or its corresponding certificate file does not exist
-		// then need to return error and not start the server. The TLS key file is specified when the user
-		// wants the server to use custom tls key and cert and don't want server to auto generate its own. So,
-		// when the key file is specified, it must exist on the file system
-		if c.TLS.KeyFile != "" {
-			if !util.FileExists(c.TLS.KeyFile) {
-				return fmt.Errorf("File specified by 'tls.keyfile' does not exist: %s", c.TLS.KeyFile)
-			}
-			if !util.FileExists(c.TLS.CertFile) {
-				return fmt.Errorf("File specified by 'tls.certfile' does not exist: %s", c.TLS.CertFile)
-			}
-			log.Debugf("TLS Certificate: %s, TLS Key: %s", c.TLS.CertFile, c.TLS.KeyFile)
-		} else if !util.FileExists(c.TLS.CertFile) {
-			// TLS key file is not specified, generate TLS key and cert if they are not already generated
-			err = s.autoGenerateTLSCertificateKey()
-			if err != nil {
-				return fmt.Errorf("Failed to automatically generate TLS certificate and key: %s", err)
-			}
-		}
-
-		cer, err := util.LoadX509KeyPair(c.TLS.CertFile, c.TLS.KeyFile, s.csp)
-		if err != nil {
-			return err
-		}
-
-		if c.TLS.ClientAuth.Type == "" {
-			c.TLS.ClientAuth.Type = defaultClientAuth
-		}
-
-		log.Debugf("Client authentication type requested: %s", c.TLS.ClientAuth.Type)
-
-		authType := strings.ToLower(c.TLS.ClientAuth.Type)
-		if clientAuth, ok = clientAuthTypes[authType]; !ok {
-			return errors.New("Invalid client auth type provided")
-		}
-
-		var certPool *x509.CertPool
-		if authType != defaultClientAuth {
-			certPool, err = LoadPEMCertPool(c.TLS.ClientAuth.CertFiles)
-			if err != nil {
-				return err
-			}
-		}
-
-		config := &tls.Config{
-			Certificates: []tls.Certificate{*cer},
-			ClientAuth:   clientAuth,
-			ClientCAs:    certPool,
-			MinVersion:   tls.VersionTLS12,
-			MaxVersion:   tls.VersionTLS12,
-			CipherSuites: stls.DefaultCipherSuites,
-		}
+		...
 
 		listener, err = tls.Listen("tcp", addr, config)
 		if err != nil {
@@ -623,30 +470,7 @@ func (s *Server) listenAndServe() (err error) {
 }
 
 func (s *Server) serve() error {
-	listener := s.listener
-	if listener == nil {
-		// This can happen as follows:
-		// 1) listenAndServe above is called with s.BlockingStart set to false
-		//    and returns to the caller
-		// 2) the caller immediately calls s.Stop, which sets s.listener to nil
-		// 3) the go routine runs and calls this function
-		// So this prevents the panic which was reported in
-		// in https://jira.hyperledger.org/browse/FAB-3100.
-		return nil
-	}
-
-	s.serveError = http.Serve(listener, s.mux)
-
-	log.Errorf("Server has stopped serving: %s", s.serveError)
-	s.closeListener()
-	err := s.closeDB()
-	if err != nil {
-		log.Errorf("Close DB failed: %s", err)
-	}
-	if s.wait != nil {
-		s.wait <- true
-	}
-	return s.serveError
+	...
 }
 ```  
 
@@ -655,32 +479,13 @@ func (s *Server) serve() error {
 在函数中调用`checkAndEnableProfiling()`来检查`FABRIC_CA_SERVER_PROFILE_PORT`是否可用：
 
 ```go
+// fabric-ca/lib/server.go
+
 // checkAndEnableProfiling checks for FABRIC_CA_SERVER_PROFILE_PORT env variable
 // if it is set, starts listening for profiling requests at the port specified
 // by the environment variable
 func (s *Server) checkAndEnableProfiling() error {
-	// Start listening for profile requests
-	pport := os.Getenv(fabricCAServerProfilePort)
-	if pport != "" {
-		iport, err := strconv.Atoi(pport)
-		if err != nil || iport < 0 {
-			log.Warningf("Profile port specified by the %s environment variable is not a valid port, not enabling profiling",
-				fabricCAServerProfilePort)
-		} else {
-			addr := net.JoinHostPort(s.Config.Address, pport)
-			listener, err1 := net.Listen("tcp", addr)
-			log.Infof("Profiling enabled; listening for profile requests on port %s", pport)
-			if err1 != nil {
-				return err1
-			}
-			go func() {
-				log.Debugf("Profiling enabled; waiting for profile requests on port %s", pport)
-				err := http.Serve(listener, nil)
-				log.Errorf("Stopped serving for profiling requests on port %s: %s", pport, err)
-			}()
-		}
-	}
-	return nil
+	...
 }
 ```  
 
