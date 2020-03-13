@@ -117,6 +117,26 @@ func NewCommand(name string) *ClientCmd {
 // registers command flgs with viper
 func (c *ClientCmd) init() {
 	...
+
+	c.rootCmd.AddCommand(c.newRegisterCommand(),
+		newEnrollCmd(c).getCommand(),
+		c.newReenrollCommand(),
+		c.newRevokeCommand(),
+		newGetCAInfoCmd(c).getCommand(),
+		c.newGenCsrCommand(),
+		c.newGenCRLCommand(),
+		c.newIdentityCommand(),
+		c.newAffiliationCommand(),
+		createCertificateCommand(c))
+	c.rootCmd.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Prints Fabric CA Client version",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Print(metadata.GetVersionInfo(cmdName))
+		},
+	})
+	c.registerFlags()
+	...
 }
 ```  
 
