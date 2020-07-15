@@ -25,6 +25,14 @@ func (ip *IP) Init(stub shim.ChaincodeStubInterface) peer.Response {
 
 // Invoke execute the chaincode function
 func (ip *IP) Invoke(stub shim.ChaincodeStubInterface) peer.Response {
+	funcs, argv := stub.GetFunctionAndParameters()
+	if funcs == "addIP" {
+		return ip.addIP(stub, argv)
+	} else if funcs == "queryIP" {
+		return ip.queryIP(stub, argv)
+	} else if funcs == "transferIP" {
+		return ip.transferIP(stub, argv)
+	}
 	return shim.Error("Not find the function")
 }
 
